@@ -5,17 +5,10 @@
 *.slo
 *.lo
 *.o
-*.obj
 
 # Precompiled Headers
 *.gch
 *.pch
-
-# Linker files
-*.ilk
-
-# Debugger Files
-*.pdb
 
 # Compiled Dynamic libraries
 *.so
@@ -37,5 +30,11 @@
 *.out
 *.app
 
-# debug information files
-*.dwo
+build/
+test_package/build/
+.vscode
+compile_commands.json
+.cache/
+
+CMakeUserPresets.json
+.DS_Store
