@@ -15,7 +15,8 @@
 #include <span>
 import vk;
 
-static VKAPI_ATTR VkBool32 VKAPI_CALL debug_callback(
+static VKAPI_ATTR VkBool32 VKAPI_CALL
+debug_callback(
   [[maybe_unused]] VkDebugUtilsMessageSeverityFlagBitsEXT p_message_severity,
   [[maybe_unused]] VkDebugUtilsMessageTypeFlagsEXT p_message_type,
   const VkDebugUtilsMessengerCallbackDataEXT* p_callback_data,
@@ -24,62 +25,25 @@ static VKAPI_ATTR VkBool32 VKAPI_CALL debug_callback(
     return false;
 }
 
-std::vector<const char*>
-initialize_instance_extensions() {
+std::vector<const char*> get_instance_extensions() {
     std::vector<const char*> extension_names;
+    uint32_t extension_count = 0;
+    const char** required_extensions = glfwGetRequiredInstanceExtensions(&extension_count);
 
-    extension_names.emplace_back(VK_KHR_SURFACE_EXTENSION_NAME);
+    for(uint32_t i = 0; i < extension_count; i++) {
+        std::println("Required Extension = {}", required_extensions[i]);
+        extension_names.emplace_back(required_extensions[i]);
+    }
 
     extension_names.emplace_back(VK_EXT_DEBUG_UTILS_EXTENSION_NAME);
 
-    // An additional surface extension needs to be loaded. This extension is
-    // platform-specific so needs to be selected based on the platform the
-    // example is going to be deployed to. Preprocessor directives are used
-    // here to select the correct platform.
-#ifdef VK_USE_PLATFORM_WIN32_KHR
-    extension_names.emplace_back(VK_KHR_WIN32_SURFACE_EXTENSION_NAME);
+#if defined(__APPLE__)
+    extension_names.emplace_back(VK_KHR_PORTABILITY_ENUMERATION_EXTENSION_NAME);
+    extension_names.emplace_back(VK_KHR_GET_PHYSICAL_DEVICE_PROPERTIES_2_EXTENSION_NAME);
 #endif
-#ifdef VK_USE_PLATFORM_XLIB_KHR
-    extensionNames.emplace_back(VK_KHR_XLIB_SURFACE_EXTENSION_NAME);
-#endif
-#ifdef VK_USE_PLATFORM_XCB_KHR
-    extensionNames.emplace_back(VK_KHR_XCB_SURFACE_EXTENSION_NAME);
-#endif
-#ifdef VK_USE_PLATFORM_ANDROID_KHR
-    extensionNames.emplace_back(VK_KHR_ANDROID_SURFACE_EXTENSION_NAME);
-#endif
-#ifdef VK_USE_PLATFORM_WAYLAND_KHR
-    extensionNames.emplace_back(VK_KHR_WAYLAND_SURFACE_EXTENSION_NAME);
-#endif
-#ifdef VK_USE_PLATFORM_MACOS_MVK
-    extensionNames.emplace_back(VK_MVK_MACOS_SURFACE_EXTENSION_NAME);
-#endif
-#ifdef USE_PLATFORM_NULLWS
-    extensionNames.emplace_back(VK_KHR_DISPLAY_EXTENSION_NAME);
-#endif
+
     return extension_names;
 }
-
-// int main(){
-//     //! @note Just added the some test code to test the conan-starter setup code
-//     if(!glfwInit()){
-//         fmt::print("glfwInit could not be initialized!\n");
-//         return -1;
-//     }
-    
-//     int width = 800;
-//     int height = 600;
-//     std::string title = "Hello Window";
-//     GLFWwindow* window = glfwCreateWindow(width, height, title.c_str(), nullptr, nullptr);
-
-//     while(!glfwWindowShouldClose(window)){
-//         glfwPollEvents();
-        
-//         glfwSwapBuffers(window);
-//     }
-//     return 0;
-// }
-
 
 int
 main() {
@@ -111,15 +75,11 @@ main() {
 
     // setting up extensions
     std::vector<const char*> global_extensions =
-      initialize_instance_extensions();
+      get_instance_extensions();
 
     vk::debug_message_utility debug_callback_info = {
-        // .severity essentially takes in vk::message::verbose,
-        // vk::message::warning, vk::message::error
         .severity =
           vk::message::verbose | vk::message::warning | vk::message::error,
-        // .message_type essentially takes in vk::debug. Like:
-        // vk::debug::general, vk::debug::validation, vk::debug::performance
         .message_type =
           vk::debug::general | vk::debug::validation | vk::debug::performance,
         .callback = debug_callback
@@ -141,23 +101,19 @@ main() {
         std::println("\napi_instance alive and initiated!!!");
     }
 
-    // TODO: Implement this as a way to setup physical devices
-    // vk::enumerate_physical_devices(vk::instance) -> returns
-    // std::span<vk::physical_device>
-
     // setting up physical device
-    // TODO: Probably enforce the use of
-    // vk::enumerate_physical_device({.device_type = vk::physical::discrete})
     vk::physical_enumeration enumerate_devices{
         .device_type = vk::physical_gpu::discrete,
     };
+
+#if defined(__APPLE__)
+    enumerate_devices.device_type = vk::physical_gpu::integrated;
+#endif
+
     vk::physical_device physical_device(api_instance, enumerate_devices);
 
     // selecting depth format
     std::array<vk::format, 3> format_support = {
-        // VK_FORMAT_D32_SFLOAT,
-        // VK_FORMAT_D32_SFLOAT_S8_UINT,
-        // VK_FORMAT_D24_UNORM_S8_UINT,
         vk::format::d32_sfloat,
         vk::format::d32_sfloat_s8_uint,
         vk::format::d24_unorm_s8_uint
@@ -175,7 +131,13 @@ main() {
 
     // setting up logical device
     std::array<float, 1> priorities = { 0.f };
+
+#if defined(__APPLE__)
+    std::array<const char*, 2> extensions = { VK_KHR_SWAPCHAIN_EXTENSION_NAME, "VK_KHR_portability_subset" };
+#else
     std::array<const char*, 1> extensions = { VK_KHR_SWAPCHAIN_EXTENSION_NAME };
+#endif
+
     vk::device_params logical_device_params = {
         .queue_priorities = priorities,
         .extensions = extensions,
@@ -207,30 +169,19 @@ main() {
                                  surface_properties);
 
     // querying swapchain images
-    // TODO: Make the images and framebuffers contained within the vk::swapchain
-    // Considering if you have two display they will prob have their own set of
-    // images to display to the two separate screens
-    uint32_t image_count = 0;
-    vkGetSwapchainImagesKHR(logical_device,
-                            main_swapchain,
-                            &image_count,
-                            nullptr); // used to get the amount of images
-    std::vector<VkImage> images(image_count);
-    vkGetSwapchainImagesKHR(logical_device,
-                            main_swapchain,
-                            &image_count,
-                            images.data()); // used to store in the images
+    std::span<const VkImage> images = main_swapchain.get_images();
+    uint32_t image_count = static_cast<uint32_t>(images.size());
 
     // Creating Images
     std::vector<vk::sample_image> swapchain_images(image_count);
-    std::vector<vk::sample_image> swapchain_depth_images(image_count);
 
     VkExtent2D swapchain_extent = surface_properties.capabilities.currentExtent;
 
     // Setting up the images
     for (uint32_t i = 0; i < swapchain_images.size(); i++) {
         vk::image_params swapchain_image_config = {
-            .extent = { .width=swapchain_extent.width, .height=swapchain_extent.width },
+            .extent = { .width = swapchain_extent.width,
+                        .height = swapchain_extent.height },
             .format = surface_properties.format.format,
             .aspect = vk::image_aspect_flags::color_bit,
             .usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT,
@@ -241,20 +192,6 @@ main() {
 
         swapchain_images[i] =
           vk::sample_image(logical_device, images[i], swapchain_image_config);
-
-        // Creating Depth Images for depth buffering
-        vk::image_params image_config = {
-            .extent = { .width=swapchain_extent.width, .height=swapchain_extent.width },
-            .format = depth_format,
-            .aspect = vk::image_aspect_flags::depth_bit,
-            // .usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT,
-            .usage = vk::image_usage::depth_stencil_bit,
-            .mip_levels = 1,
-            .layer_count = 1,
-            .phsyical_memory_properties = physical_device.memory_properties(),
-        };
-        swapchain_depth_images[i] =
-          vk::sample_image(logical_device, image_config);
     }
 
     // setting up command buffers
@@ -270,25 +207,16 @@ main() {
           vk::command_buffer(logical_device, settings);
     }
 
+    // setting up renderpass
+
     // setting up attachments for the renderpass
-    std::array<vk::attachment, 2> renderpass_attachments = {
+    std::array<vk::attachment, 1> renderpass_attachments = {
         vk::attachment{
           .format = surface_properties.format.format,
           .layout = vk::image_layout::color_optimal,
           .samples = vk::sample_bit::count_1,
           .load = vk::attachment_load::clear,
-          .store = vk::attachment_store::dont_care,
-          .stencil_load = vk::attachment_load::clear,
-          .stencil_store = vk::attachment_store::dont_care,
-          .initial_layout = vk::image_layout::undefined,
-          .final_layout = vk::image_layout::present_src_khr,
-        },
-        vk::attachment{
-          .format = depth_format,
-          .layout = vk::image_layout::depth_stencil_optimal,
-          .samples = vk::sample_bit::count_1,
-          .load = vk::attachment_load::clear,
-          .store = vk::attachment_store::dont_care,
+          .store = vk::attachment_store::store,
           .stencil_load = vk::attachment_load::clear,
           .stencil_store = vk::attachment_store::dont_care,
           .initial_layout = vk::image_layout::undefined,
@@ -310,8 +238,7 @@ main() {
         // ensure this is the case Since you have an image for color attachment
         // and another image for the depth atttachment to specify
         std::array<VkImageView, renderpass_attachments.size()>
-          image_view_attachments = { swapchain_images[i].image_view(),
-                                     swapchain_depth_images[i].image_view() };
+          image_view_attachments = { swapchain_images[i].image_view() };
 
         vk::framebuffer_params framebuffer_info = {
             .renderpass = main_renderpass,
@@ -358,11 +285,14 @@ main() {
         std::println("geometry resource is valid!");
     }
 
+    // Setting up descriptor sets for graphics pipeline
     std::array<vk::color_blend_attachment_state, 1> color_blend_attachments = {
         vk::color_blend_attachment_state{},
     };
 
-    std::array<vk::dynamic_state, 2> dynamic_states = { vk::dynamic_state::viewport, vk::dynamic_state::scissor };
+    std::array<vk::dynamic_state, 2> dynamic_states = {
+        vk::dynamic_state::viewport, vk::dynamic_state::scissor
+    };
     vk::pipeline_params pipeline_configuration = {
         .renderpass = main_renderpass,
         .shader_modules = geometry_resource.handles(),
@@ -410,14 +340,13 @@ main() {
         main_renderpass.end(current);
         current.end();
 
-        // Submit workload and then presents the information to the screen
+        // Submitting and then presenting to the screen
         std::array<const VkCommandBuffer, 1> commands = { current };
         presentation_queue.submit_async(commands);
         presentation_queue.present_frame(current_frame);
     }
 
-
-    // Must be called after the application exits
+    // this to ensure they are cleaned up in the proper order
     logical_device.wait();
     main_swapchain.destroy();
 
@@ -431,10 +360,6 @@ main() {
 
     for (auto& image : swapchain_images) {
         image.destroy();
-    }
-
-    for (auto& depth_image : swapchain_depth_images) {
-        depth_image.destroy();
     }
 
     main_graphics_pipeline.destroy();
