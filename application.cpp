@@ -469,9 +469,9 @@ main() {
         test_ibo.bind(current);
 
         // Drawing-call to render actual triangle to the screen
-        // vkCmdDraw(current, 3, 1, 0, 0);
-        vkCmdDrawIndexed(
-          current, static_cast<uint32_t>(indices.size()), 1, 0, 0, 0);
+        vkCmdDraw(current, 3, 1, 0, 0);
+        // vkCmdDrawIndexed(
+        //   current, static_cast<uint32_t>(indices.size()), 1, 0, 0, 0);
 
         main_renderpass.end(current);
         current.end();
