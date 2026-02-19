@@ -405,14 +405,17 @@ main() {
     //         {1.f, 1.f},
     //     }
     // };
+    // (2, 2) -> (-2, -2)
+    // (2, -2) -> -2, 2
+    // (-2, -2) -> (2, 2)
     std::array<vk::vertex_input, 4> vertices = {
-        vk::vertex_input{ .position = { -0.5f, -0.5f, 0.f },
+        vk::vertex_input{ .position = { -0.2f, -0.2f, 0.f },
                           .color = { 1.0f, 0.0f, 0.0f } },
-        vk::vertex_input{ .position = { 0.5f, -0.5f, 0.f },
+        vk::vertex_input{ .position = { -0.2f, 0.2f, 0.f },
                           .color = { 0.0f, 1.0f, 0.0f } },
-        vk::vertex_input{ .position = { 0.5f, 0.5f, 0.f },
+        vk::vertex_input{ .position = { 0.2f, 0.2f, 0.f },
                           .color = { 0.0f, 0.0f, 1.0f } },
-        vk::vertex_input{ .position = { -0.5f, 0.5f, 0.f },
+        vk::vertex_input{ .position = { 0.2f, -0.2f, 0.f },
                           .color = { 1.0f, 1.0f, 1.0f } }
     };
     // vk::vertex_buffer_info vertex_info = {
@@ -469,7 +472,7 @@ main() {
         test_ibo.bind(current);
 
         // Drawing-call to render actual triangle to the screen
-        vkCmdDraw(current, 3, 1, 0, 0);
+        // vkCmdDraw(current, 3, 1, 0, 0);
         // vkCmdDrawIndexed(
         //   current, static_cast<uint32_t>(indices.size()), 1, 0, 0, 0);
 
