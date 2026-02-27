@@ -308,7 +308,7 @@ main() {
       logical_device, main_swapchain, enumerate_present_queue);
 
     // gets set with the renderpass
-    std::array<float, 4> color = { 0.f, 0.5f, 0.5f, 1.f };
+    std::array<float, 4> color = { 0.f, 0.f, 0.f, 1.f };
 
     std::println("Start implementing graphics pipeline!!!");
 
@@ -372,11 +372,20 @@ main() {
         vk::dynamic_state::viewport, vk::dynamic_state::scissor
     };
 
+    /**
+        point_light
+        triangle_strip
+        triangle_list
+        line_light
+    */
     vk::pipeline_params pipeline_configuration = {
         .renderpass = main_renderpass,
         .shader_modules = geometry_resource.handles(),
         .vertex_attributes = geometry_resource.vertex_attributes(),
         .vertex_bind_attributes = geometry_resource.vertex_bind_attributes(),
+        // .input_assembly = {
+        //     .topology = vk::primitive_topology::line_light
+        // },
         .color_blend = {
             .attachments = color_blend_attachments,
         },
@@ -409,13 +418,13 @@ main() {
     // (2, -2) -> -2, 2
     // (-2, -2) -> (2, 2)
     std::array<vk::vertex_input, 4> vertices = {
-        vk::vertex_input{ .position = { -0.2f, -0.2f, 0.f },
+        vk::vertex_input{ .position = { -0.2f, -0.2f, 0.f }, // {0}
                           .color = { 1.0f, 0.0f, 0.0f } },
-        vk::vertex_input{ .position = { -0.2f, 0.2f, 0.f },
+        vk::vertex_input{ .position = { -0.2f, 0.2f, 0.f }, // {1}
                           .color = { 0.0f, 1.0f, 0.0f } },
-        vk::vertex_input{ .position = { 0.2f, 0.2f, 0.f },
+        vk::vertex_input{ .position = { 0.2f, 0.2f, 0.f }, // {2}
                           .color = { 0.0f, 0.0f, 1.0f } },
-        vk::vertex_input{ .position = { 0.2f, -0.2f, 0.f },
+        vk::vertex_input{ .position = { 0.2f, -0.2f, 0.f }, // {3}
                           .color = { 1.0f, 1.0f, 1.0f } }
     };
     // vk::vertex_buffer_info vertex_info = {
@@ -473,8 +482,8 @@ main() {
 
         // Drawing-call to render actual triangle to the screen
         // vkCmdDraw(current, 3, 1, 0, 0);
-        // vkCmdDrawIndexed(
-        //   current, static_cast<uint32_t>(indices.size()), 1, 0, 0, 0);
+        vkCmdDrawIndexed(
+          current, static_cast<uint32_t>(indices.size()), 1, 0, 0, 0);
 
         main_renderpass.end(current);
         current.end();
