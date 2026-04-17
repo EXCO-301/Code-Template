@@ -22,6 +22,8 @@ build_application(
     Vulkan
     glm
     stb
+    tinyobjloader
+    yaml-cpp
     vulkan-cpp
 
     LINK_PACKAGES
@@ -29,5 +31,7 @@ build_application(
     Vulkan::Vulkan
     glm::glm
     stb::stb
+    tinyobjloader
+    yaml-cpp
     vulkan-cpp
 )

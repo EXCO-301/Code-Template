@@ -17,11 +17,14 @@
 import vk;
 
 #include <chrono>
+#include <yaml-cpp/yaml.h>
 #define GLM_FORCE_RADIANS
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
-#include <algorithm>
-#include <cmath>
+#define GLM_ENABLE_EXPERIMENTAL
+#include <glm/gtx/hash.hpp>
+#include <tiny_obj_loader.h>
+#include <fstream>
 
 static VKAPI_ATTR VkBool32 VKAPI_CALL
 debug_callback(
@@ -65,6 +68,157 @@ struct global_uniform {
 struct material_uniform {
     glm::vec4 color;
 };
+
+template<typename T, typename... Rest>
+void
+hash_combine(size_t& seed, const T& v, const Rest&... rest) {
+    seed ^= std::hash<T>()(v) + 0x9e3779b9 + (seed << 6) + (seed << 2);
+    (hash_combine(seed, rest), ...);
+}
+
+namespace std {
+
+    template<>
+    struct hash<vk::vertex_input> {
+        size_t operator()(const vk::vertex_input& vertex) const {
+            size_t seed = 0;
+            hash_combine(
+              seed, vertex.position, vertex.color, vertex.normals, vertex.uv);
+            return seed;
+        }
+    };
+}
+
+
+// Part of this demo for loading a 3D .obj model
+class obj_model {
+public:
+    obj_model() = default;
+    obj_model(const std::filesystem::path& p_filename,
+              const VkDevice& p_device,
+              const vk::physical_device& p_physical) {
+        tinyobj::attrib_t attrib;
+        std::vector<tinyobj::shape_t> shapes;
+        std::vector<tinyobj::material_t> materials;
+        std::string warn, err;
+
+        //! @note If we return the constructor then we can check if the mesh
+        //! loaded successfully
+        //! @note We also receive hints if the loading is successful!
+        //! @note Return default constructor automatically returns false means
+        //! that mesh will return the boolean as false because it wasnt
+        //! successful
+        if (!tinyobj::LoadObj(&attrib,
+                              &shapes,
+                              &materials,
+                              &warn,
+                              &err,
+                              p_filename.string().c_str())) {
+            std::println("Could not load model from path {}",
+                         p_filename.string());
+            m_is_loaded = false;
+            return;
+        }
+
+        std::vector<vk::vertex_input> vertices;
+        std::vector<uint32_t> indices;
+        std::unordered_map<vk::vertex_input, uint32_t> unique_vertices{};
+
+        for (const auto& shape : shapes) {
+            for (const auto& index : shape.mesh.indices) {
+                vk::vertex_input vertex{};
+
+                // vertices.push_back(vertex);
+                if (!unique_vertices.contains(vertex)) {
+                    unique_vertices[vertex] =
+                      static_cast<uint32_t>(vertices.size());
+                    vertices.push_back(vertex);
+                }
+
+                if (index.vertex_index >= 0) {
+                    vertex.position = {
+                        attrib.vertices[3 * index.vertex_index + 0],
+                        attrib.vertices[3 * index.vertex_index + 1],
+                        attrib.vertices[3 * index.vertex_index + 2]
+                    };
+
+                    vertex.color = {
+                        attrib.colors[3 * index.vertex_index + 0],
+                        attrib.colors[3 * index.vertex_index + 1],
+                        attrib.colors[3 * index.vertex_index + 2]
+                    };
+                }
+
+                if (index.normal_index >= 0) {
+                    vertex.normals = {
+                        attrib.normals[3 * index.normal_index + 0],
+                        attrib.normals[3 * index.normal_index + 1],
+                        attrib.normals[3 * index.normal_index + 2]
+                    };
+                }
+
+                if (index.texcoord_index >= 0) {
+                    vertex.uv = {
+                        attrib.texcoords[2 * index.texcoord_index + 0],
+                        1.0f - attrib.texcoords[2 * index.texcoord_index + 1]
+                    };
+                }
+
+                if (!unique_vertices.contains(vertex)) {
+                    unique_vertices[vertex] =
+                      static_cast<uint32_t>(vertices.size());
+                    vertices.push_back(vertex);
+                }
+
+                indices.push_back(unique_vertices[vertex]);
+            }
+        }
+        vk::vertex_params vertex_info = { .phsyical_memory_properties =
+                                            p_physical.memory_properties(),
+                                          .vertices = vertices };
+
+        vk::index_params index_info = { .phsyical_memory_properties =
+                                          p_physical.memory_properties(),
+                                        .indices = indices };
+        m_vertex_buffer = vk::vertex_buffer(p_device, vertex_info);
+        m_index_buffer = vk::index_buffer(p_device, index_info);
+        m_is_loaded = true;
+    }
+
+    [[nodiscard]] bool loaded() const { return m_is_loaded; }
+
+    void bind(const VkCommandBuffer& p_command) {
+        m_vertex_buffer.bind(p_command);
+        if (m_index_buffer.size() > 0) {
+            m_index_buffer.bind(p_command);
+        }
+    }
+
+    void draw(const VkCommandBuffer& p_command) {
+        if (m_index_buffer.size() > 0) {
+            vkCmdDrawIndexed(p_command,
+                             static_cast<uint32_t>(m_index_buffer.size()),
+                             1,
+                             0,
+                             0,
+                             0);
+        }
+        else {
+            vkCmdDraw(p_command, m_vertex_buffer.size(), 1, 0, 0);
+        }
+    }
+
+    void destroy() {
+        m_vertex_buffer.destroy();
+        m_index_buffer.destroy();
+    }
+
+private:
+    bool m_is_loaded = false;
+    vk::vertex_buffer m_vertex_buffer{};
+    vk::index_buffer m_index_buffer{};
+};
+
 
 int
 main() {
@@ -326,18 +480,25 @@ main() {
     };
 
     // Setting up vertex attributes in the test shaders
-    std::array<vk::vertex_attribute_entry, 3> attribute_entries = {
+    std::array<vk::vertex_attribute_entry, 4> attribute_entries = {
         vk::vertex_attribute_entry{ .location = 0,
-                                    .format = vk::format::rg32_sfloat,
+                                    .format = vk::format::rgb32_sfloat,
                                     .stride =
                                       offsetof(vk::vertex_input, position) },
         vk::vertex_attribute_entry{ .location = 1,
                                     .format = vk::format::rgb32_sfloat,
                                     .stride =
                                       offsetof(vk::vertex_input, color) },
-        vk::vertex_attribute_entry{ .location = 2,
-                                    .format = vk::format::rg32_sfloat,
-                                    .stride = offsetof(vk::vertex_input, uv) }
+        vk::vertex_attribute_entry{
+            .location = 2,
+            .format = vk::format::rg32_sfloat,
+            .stride = offsetof(vk::vertex_input, uv),
+        },
+        vk::vertex_attribute_entry{
+            .location = 3,
+            .format = vk::format::rgb32_sfloat,
+            .stride = offsetof(vk::vertex_input, normals),
+        }
     };
 
     std::array<vk::vertex_attribute, 1> attributes = {
@@ -428,39 +589,74 @@ main() {
     }
 
     // Setting up vertex buffer
-    std::array<vk::vertex_input, 4> vertices = {
-        vk::vertex_input{ .position = { -0.5f, -0.5f, 0.f },
-                          .color = { 1.0f, 0.0f, 0.0f },
-                          .normals = { 0.f, 0.f, 0.f },
-                          .uv = { 1.0f, 0.0f } },
-        vk::vertex_input{ .position = { 0.5f, -0.5f, 0.f },
-                          .color = { 0.0f, 1.0f, 0.0f },
-                          .normals = { 0.f, 0.f, 0.f },
-                          .uv = { 0.0f, 0.0f } },
-        vk::vertex_input{ .position = { 0.5f, 0.5f, 0.f },
-                          .color = { 0.0f, 0.0f, 1.0f },
-                          .normals = { 0.f, 0.f, 0.f },
-                          .uv = { 0.0f, 1.0f } },
-        vk::vertex_input{ .position = { -0.5f, 0.5f, 0.f },
-                          .color = { 1.0f, 1.0f, 1.0f },
-                          .normals = { 0.f, 0.f, 0.f },
-                          .uv = { 1.0f, 1.0f } }
-    };
-    vk::vertex_params vertex_info = {
-        .phsyical_memory_properties = physical_device.memory_properties(),
-        .vertices = vertices,
-    };
-    vk::vertex_buffer test_vbo(logical_device, vertex_info);
-    std::println("vertex_buffer.alive() = {}", test_vbo.alive());
+    // std::array<vk::vertex_input, 4> vertices = {
+    //     vk::vertex_input{ .position = { -0.5f, -0.5f, 0.f },
+    //                       .color = { 1.0f, 0.0f, 0.0f },
+    //                       .normals = { 0.f, 0.f, 0.f },
+    //                       .uv = { 1.0f, 0.0f } },
+    //     vk::vertex_input{ .position = { 0.5f, -0.5f, 0.f },
+    //                       .color = { 0.0f, 1.0f, 0.0f },
+    //                       .normals = { 0.f, 0.f, 0.f },
+    //                       .uv = { 0.0f, 0.0f } },
+    //     vk::vertex_input{ .position = { 0.5f, 0.5f, 0.f },
+    //                       .color = { 0.0f, 0.0f, 1.0f },
+    //                       .normals = { 0.f, 0.f, 0.f },
+    //                       .uv = { 0.0f, 1.0f } },
+    //     vk::vertex_input{ .position = { -0.5f, 0.5f, 0.f },
+    //                       .color = { 1.0f, 1.0f, 1.0f },
+    //                       .normals = { 0.f, 0.f, 0.f },
+    //                       .uv = { 1.0f, 1.0f } }
+    // };
+    // vk::vertex_params vertex_info = {
+    //     .phsyical_memory_properties = physical_device.memory_properties(),
+    //     .vertices = vertices,
+    // };
+    // vk::vertex_buffer test_vbo(logical_device, vertex_info);
+    std::ifstream ins("test_scene");
+    std::stringstream ss;
+    ss << ins.rdbuf();
 
-    std::array<uint32_t, 6> indices = { 0, 1, 2, 2, 3, 0 };
+    // YAML::Node data = YAML::Load(ss.str());
 
-    vk::index_params index_info = {
-        .phsyical_memory_properties = physical_device.memory_properties(),
-        .indices = indices,
-    };
-    vk::index_buffer test_ibo(logical_device, index_info);
-    std::println("index_buffer.alive() = {}", test_ibo.alive());
+    std::string model_path = "";
+    std::string texture_path = "";
+    bool is_slip=false;
+    try {
+    YAML::Node load_config_data = YAML::Load(ss.str());
+
+    // if (!load_config_data["Scene"]) {
+    //     return false;
+    // }
+
+    if(load_config_data["3d_model"]) {
+        model_path = load_config_data["3d_model"].as<std::string>();
+
+        std::println("Loading model path = {}", model_path);
+    }
+
+    if(load_config_data["texture_path"]) {
+        texture_path = load_config_data["texture_path"].as<std::string>();
+
+        std::println("Loading model path = {}", texture_path);
+    }
+    }
+    catch(const YAML::Exception& e) {
+        std::println("Error parsing YAML: ", e.what());
+    }
+
+
+    obj_model test_3d_model(std::filesystem::path(model_path), logical_device, physical_device);
+
+    // std::println("vertex_buffer.alive() = {}", test_vbo.alive());
+
+    // std::array<uint32_t, 6> indices = { 0, 1, 2, 2, 3, 0 };
+
+    // vk::index_params index_info = {
+    //     .phsyical_memory_properties = physical_device.memory_properties(),
+    //     .indices = indices,
+    // };
+    // vk::index_buffer test_ibo(logical_device, index_info);
+    // std::println("index_buffer.alive() = {}", test_ibo.alive());
 
     // Setting up descriptor sets for handling uniforms
     vk::uniform_params test_ubo_info = { .phsyical_memory_properties =
@@ -479,10 +675,26 @@ main() {
     // Loading a texture -- for testing
     vk::texture_info config_texture = {
         .phsyical_memory_properties = physical_device.memory_properties(),
-        .filepath =
-          std::filesystem::path("asset_samples/container_diffuse.png"),
+        // .filepath =
+        //   std::filesystem::path("asset_samples/container_diffuse.png"),
+        .filepath = std::filesystem::path(texture_path),
     };
-    vk::texture texture1(logical_device, config_texture);
+    // vk::texture texture1(logical_device, config_texture);
+    vk::texture texture1;
+
+    if(texture_path.empty()) {
+        texture1 = vk::texture(logical_device, {1, 1}, physical_device.memory_properties());
+    }
+    else {
+        vk::texture_info config_texture = {
+            .phsyical_memory_properties = physical_device.memory_properties(),
+            // .filepath =
+            //   std::filesystem::path("asset_samples/container_diffuse.png"),
+            .filepath = std::filesystem::path(texture_path),
+        };
+
+        texture1 = vk::texture(logical_device, config_texture);
+    }
 
     std::println("texture1.valid = {}", texture1.loaded());
 
@@ -540,8 +752,9 @@ main() {
         // drawing stuff to
         main_graphics_pipeline.bind(current);
 
-        test_vbo.bind(current);
-        test_ibo.bind(current);
+        // test_vbo.bind(current);
+        // test_ibo.bind(current);
+        test_3d_model.bind(current);
 
         static auto start_time = std::chrono::high_resolution_clock::now();
 
@@ -575,8 +788,9 @@ main() {
         set0_resource.bind(current, main_graphics_pipeline.layout());
         // Drawing-call to render actual triangle to the screen
         // vkCmdDraw(current, 3, 1, 0, 0);
-        vkCmdDrawIndexed(
-          current, static_cast<uint32_t>(indices.size()), 1, 0, 0, 0);
+        // vkCmdDrawIndexed(
+        //   current, static_cast<uint32_t>(indices.size()), 1, 0, 0, 0);
+        test_3d_model.draw(current);
 
         main_renderpass.end(current);
         current.end();
@@ -598,8 +812,9 @@ main() {
     set0_resource.destroy();
     test_ubo.destroy();
     material_ubo.destroy();
-    test_ibo.destroy();
-    test_vbo.destroy();
+    // test_ibo.destroy();
+    // test_vbo.destroy();
+    test_3d_model.destroy();
 
     for (auto& command : swapchain_command_buffers) {
         command.destroy();

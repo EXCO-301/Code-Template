@@ -27,6 +27,8 @@ class StarterConanRecipe(ConanFile):
 
         self.requires("vulkan-cpp/5.0")
         self.requires("stb/cci.20230920")
+        self.requires("tinyobjloader/2.0.0-rc10")
+        self.requires("yaml-cpp/0.8.0")
 
     def layout(self):
         cmake_layout(self)
